@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DealJudge on GenLayer</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:680px;margin:2rem auto;padding:0 1rem;color:#222}
+input,textarea,button{width:100%;padding:.7rem;margin:.3rem 0;font-size:1rem;box-sizing:border-box}
+button{background:#7c3aed;color:#fff;border:0;border-radius:8px;cursor:pointer}
+button:disabled{opacity:.5}.row{display:flex;gap:.5rem}.row>*{flex:1}
+.card{border:1px solid #ddd;border-radius:10px;padding:.8rem;margin:.6rem 0}
+.APPROVED{border-left:6px solid #16a34a}.REJECTED{border-left:6px solid #dc2626}
+.NEEDS_REVISION{border-left:6px solid #ca8a04}.OPEN,.SUBMITTED{border-left:6px solid #6b7280}
+small{color:#666;word-break:break-all}
+</style></head><body>
+<h1>DealJudge</h1>
+<p>A freelance deal lifecycle on GenLayer: create a deal with terms, a worker submits a URL, validators judge the work against the terms by consensus.</p>
+<label>Contract address</label><input id="addr" value="0x7a974De2B050Cbc01c8c6873AccDBfb82c2B0bD8">
+<small id="who"></small>
+<h3>1. Create deal (client)</h3>
+<input id="title" placeholder="Title"><textarea id="terms" rows="3" placeholder="Terms: what must the work contain?"></textarea>
+<button id="create">Create deal</button>
+<h3>2. Submit work / judge</h3>
+<input id="did" placeholder="Deal ID (e.g. 0)"><input id="wurl" placeholder="Work URL (for worker)">
+<div class="row"><button id="submit">Submit work (worker)</button><button id="judge">Request judgment</button></div>
+<p id="status"></p>
+<h2>Deals</h2><button id="refresh">Refresh</button><div id="list"></div>
+<p><small>Tip: client and worker must be different accounts. Use a second browser profile to act as the worker.</small></p>
+<script type="module">
+import { createClient, createAccount } from "https://esm.sh/genlayer-js@latest";
+import { studionet } from "https://esm.sh/genlayer-js@latest/chains";
+const $ = id => document.getElementById(id);
+let key = localStorage.getItem("dj_key");
+const account = key ? createAccount(key) : createAccount();
+if (!key) localStorage.setItem("dj_key", account.privateKey ?? "");
+const client = createClient({ chain: studionet, account });
+$("who").textContent = "Your account: " + account.address;
+const addr = () => $("addr").value.trim();
+async function send(fn, args) {
+  $("status").textContent = "Sending… waiting for consensus (can take ~1 min).";
+  try {
+    const hash = await client.writeContract({ address: addr(), functionName: fn, args, value: 0n });
+    await client.waitForTransactionReceipt({ hash, status: "ACCEPTED", retries: 60, interval: 3000 });
+    $("status").textContent = "Done ✅"; await load();
+  } catch (e) { $("status").textContent = "Error: " + (e.message || e); }
+}
+async function load() {
+  const n = Number(await client.readContract({ address: addr(), functionName: "get_count", args: [] }));
+  $("list").innerHTML = "";
+  for (let i = n - 1; i >= Math.max(0, n - 10); i--) {
+    const raw = await client.readContract({ address: addr(), functionName: "get_deal", args: [String(i)] });
+    if (!raw) continue; const d = JSON.parse(raw);
+    $("list").innerHTML += `<div class="card ${d.status}"><b>#${d.id} ${d.title}</b> — ${d.status}<br>${d.terms}<br>${d.reason}<br><small>work: ${d.work_url || "-"}</small></div>`;
+  }
+}
+$("create").onclick = () => send("create_deal", [$("title").value, $("terms").value]);
+$("submit").onclick = () => send("submit_work", [$("did").value.trim(), $("wurl").value.trim()]);
+$("judge").onclick = () => send("judge", [$("did").value.trim()]);
+$("refresh").onclick = load;
+</script></body></html>
